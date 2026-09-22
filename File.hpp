@@ -3,12 +3,9 @@
 
 // This file will represent a simple file which is a collection of Chunks
 #include "Chunk.hpp"
+#include "Socket.hpp"
 #include <filesystem>
-#include <fstream>
-#include <print>
-#include <stdexcept>
-#include <string>
-#include <utility>
+#include <span>
 #include <vector>
 
 class File {
@@ -32,6 +29,10 @@ public:
 
     void displayFileContents() const;
     void displayFormattedContents() const;
+    void embed(Socket& socket);
+
+    // Return a span of chunks belonging to the file, however one cannot modify the chunks
+    std::span<const Chunk> getChunks() const noexcept { return chunks; } 
 };
 
 #endif /* EEB45E86_ABC9_4246_9506_71F1A4BA48D8 */

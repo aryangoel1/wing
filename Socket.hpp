@@ -19,13 +19,14 @@ public:
     Socket();
     ~Socket(); 
     Socket(const Socket&) = delete; // Disable copy constructor - we dont want 2 sockets pointing to the same file descriptor
-    Socket& operator=(const Socket&) = delete; // Disable copy assignment
+    Socket& operator=(const Socket&) = delete; // Disable copy assignment - we dont two sockets - singleton
 
     // The send function here will actually send the text belonging to a chunk to the server
     void send(const std::string& message);
 
     // We now need a function that receives the embedding from the server and then stores it in the
     // chunk. float* embedding is where the data will be stored
+    // size 
     void receive(float* embedding, std::size_t size); 
 };
 

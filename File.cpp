@@ -1,8 +1,10 @@
 #include "File.hpp"
 #include <algorithm>
 #include <cstdint>
+#include <fstream>
 #include <iterator>
 #include <utility> // std::move inside the utility header will cast the specific object to an rvalue reference
+#include <print>
 
 
 File::File(const std::filesystem::path& path) {
@@ -72,5 +74,13 @@ void File::displayFormattedContents() const {
             chunk.text,
             chunk.file_path
         );
+    }
+}
+
+void File::embed(Socket& socket) {
+    for (auto& chunk : chunks) {
+        socket.send(chunk.text); // Send the chunk's text to the embedding server
+        socket.receive(chunk.embedding.data(),
+                       chunk.embedding.size()); // Receive the embedding and store it in the chunk
     }
 }
