@@ -7,8 +7,10 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <string>
+
 // A Network socket is an endpoint for sending or receiving data across a computer network
 // A File Descriptor is a unique identifier for a file or socket in Unix-like operating systems
+// stdin - o; stdout - 1; stderr - 2
 class Socket {
 private:
     int m_fd;

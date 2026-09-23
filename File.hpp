@@ -32,6 +32,7 @@ public:
     void embed(Socket& socket);
 
     // Return a span of chunks belonging to the file, however one cannot modify the chunks
+    // pointer + length where length is the number of elements (not number of bytes)
     std::span<const Chunk> getChunks() const noexcept { return chunks; } 
 };
 

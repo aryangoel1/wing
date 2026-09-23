@@ -38,6 +38,7 @@ inline float dot_product(std::span<const float> a, std::span<const float> b) {
     // Process 16 floats at a time using SIMD
     for (; i + 15 < a.size(); i += 16) {
         // Fused multiply-add: acc0 = acc0 + (a_ptr[i] * b_ptr[i])
+        // vld1q_f32 only loads 4 elements at a time
         acc0 = vfmaq_f32(acc0, vld1q_f32(a_ptr + i), vld1q_f32(b_ptr + i));
 
         // Fused multiply-add: acc1 = acc1 + (a_ptr[i + 4] * b_ptr[i + 4])

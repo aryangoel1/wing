@@ -1,10 +1,17 @@
 #include "VectorSearch.hpp"
 #include "Chunk.hpp"
 #include "Socket.hpp"
+#include <algorithm>
 #include <chrono>
+#include <filesystem>
+#include <mach-o/dyld.h>   // _NSGetExecutablePath, macOS only
 #include <print>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
+
+// These things are only visible inside of main.cpp
 namespace {
 
 // ANSI escape codes. "\033[" opens the sequence, the number selects a style, "m" ends it.
@@ -41,6 +48,55 @@ void printUsage(const char* program) {
     std::println();
 }
 
+// Where the binary itself lives. argv[0] is just "wing" when it is found on PATH,
+// so it cannot tell us that. canonical() follows the ~/.local/bin/wing symlink back to
+// the real build/wing, which is what lets a bare filename resolve no matter which
+// directory the user ran from.
+std::filesystem::path executableDir() {
+    std::uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);      // first call just asks for the length
+    std::string buffer(size, '\0');
+    if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
+        return std::filesystem::current_path();
+    }
+    return std::filesystem::canonical(buffer.c_str()).parent_path();
+}
+
+// Turn whatever the user typed into a real file. A path that already points at a file
+// is used as-is, so absolute and relative paths keep working. Otherwise we look for a
+// file of that name in a few sensible places, which is what makes "wing search
+// cooking.txt" work instead of requiring "samples/cooking.txt".
+std::filesystem::path resolvePath(const std::string& name) {
+    namespace fs = std::filesystem;
+
+    // is_regular_file rather than exists(): a directory "exists" and ifstream will
+    // happily open one, then read nothing and hand back an empty index.
+    if (fs::is_regular_file(name)) {
+        return name;
+    }
+
+    const fs::path here = fs::current_path(); 
+    const fs::path root = executableDir().parent_path();    // build/ -> project root
+
+    // Deduplicated because running from the project directory makes here == root,
+    // which would otherwise list every location twice in the error message.
+    std::vector<fs::path> search_path{ here, here / "samples", root, root / "samples" };
+    std::sort(search_path.begin(), search_path.end());
+    search_path.erase(std::unique(search_path.begin(), search_path.end()), search_path.end());
+
+        for (const auto& base : search_path) {
+        if (const fs::path candidate = base / name; fs::is_regular_file(candidate)) {
+            return candidate;
+        }
+    }
+
+    std::string message = "No file named '" + name + "'. Looked in:";
+    for (const auto& base : search_path) {
+        message += "\n    " + base.string();
+    }
+    throw std::runtime_error(message);
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -61,12 +117,13 @@ int main(int argc, char* argv[]) {
                 printUsage(argv[0]);
                 return 1;
             }
+            const auto path = resolvePath(argv[2]);
             const auto start = std::chrono::steady_clock::now();
-            db.addFile(argv[2]);
+            db.addFile(path);
             db.embedAll(socket);
             const double secs =
                 std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-            std::println("  indexed {}{}{} in {}{:.2f}s{}", BOLD, argv[2], RESET, BOLD, secs, RESET);
+            std::println("  indexed {}{}{} in {}{:.2f}s{}", BOLD, path.string(), RESET, BOLD, secs, RESET);
             std::println();
 
         } else if (command == "search") {
@@ -74,7 +131,7 @@ int main(int argc, char* argv[]) {
                 printUsage(argv[0]);
                 return 1;
             }
-            db.addFile(argv[2]);
+            db.addFile(resolvePath(argv[2]));
             db.embedAll(socket);
 
             const auto hits = db.search(socket, argv[3], 5);
