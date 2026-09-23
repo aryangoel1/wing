@@ -1,5 +1,5 @@
 # Build output
-build/
+build*/
 *.o
 *.out
 *.dSYM/
@@ -12,3 +12,6 @@ __pycache__/
 # Editor / OS
 .vscode/
 .DS_Store
+
+# clangd index
+.cache/
