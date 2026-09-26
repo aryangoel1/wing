@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <arm_neon.h>
+#include <cmath>
 #include <cstddef>
 #include <span>
 #include <stdexcept>
@@ -62,6 +63,32 @@ inline float dot_product(std::span<const float> a, std::span<const float> b) {
     // std::clamp ensures that the result is within the range [-1.0, 1.0]
     return std::clamp(sum, -1.0f, 1.0f);
 }
+
+inline float vectorMagnitude(std::span<const float> a) {
+    // Calculate the magnitude. Load 4 vectors at a time each with length 128 bit and apply square
+    // on all of them
+    const float* a_ptr = a.data();
+
+    float result = 0;
+
+    std::size_t i = 0;
+    for (; i + 15 < a.size(); i += 16) {
+        // Load the 4 vectors
+        float32x4_t acc0 = vld1q_f32(a_ptr + i);
+        float32x4_t acc1 = vld1q_f32(a_ptr + i + 4);
+        float32x4_t acc2 = vld1q_f32(a_ptr + i + 8);
+        float32x4_t acc3 = vld1q_f32(a_ptr + i + 12);
+
+        result += vaddvq_f32(vmulq_f32(acc0, acc0) + vmulq_f32(acc1, acc1) + vmulq_f32(acc2, acc2) +
+                             vmulq_f32(acc3, acc3));
+    }
+
+    for (; i < a.size(); ++i) {
+        result += a[i] * a[i];
+    }
+    return std::sqrt(result);
+}
+
 
 
 }
