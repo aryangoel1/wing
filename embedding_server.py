@@ -1,5 +1,6 @@
 import socket
 from sentence_transformers import SentenceTransformer
+import torch
 
 SERVER_IP = "127.0.0.1"
 SERVER_PORT = 5000
@@ -9,8 +10,12 @@ DIMENSION = 384  # Dimension of the embedding vector for 'all-MiniLM-L6-v2'
 # long source line is never silently truncated -- recvfrom discards whatever does not fit
 # and gives no indication it happened.
 MAX_DATAGRAM = 65535
+# Matches batch_size in File::embed. The client sends this many lines before it reads
+# any replies, so up to this many can be sitting in the socket at once.
+MAX_BATCH = 42
 
-model = SentenceTransformer('all-MiniLM-L6-v2')
+model = SentenceTransformer('all-MiniLM-L6-v2', device="mps") # Use Metal GPU
+
 
 class Data:
     # One socket, not two. A UDP socket is bidirectional: the same socket that receives a
@@ -19,33 +24,50 @@ class Data:
     # this process instead of reaching the client.
     def __init__(self, ip, port):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # Create a UDP socket
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 10485760) # Request a 10mb buffer for the python socket   
         self.sock.bind((ip, port)) # Bind the socket to the specified address and port
 
-    def receive_data(self):
-        data, addr = self.sock.recvfrom(MAX_DATAGRAM) # Receive data from the socket
-        # addr is the client's (ip, port). The C++ client never binds, so the kernel gives
-        # it a random ephemeral port -- this tuple is the only way to know where to reply.
-        return data.decode('utf-8', errors='replace'), addr # Decode the received bytes to a string
+    def receive_batch(self):
+        # Each datagram is one line, and recvfrom only ever returns one datagram. So block
+        # for the first, then drain whatever else is already queued without waiting. There
+        # is no "end of batch" marker on the wire: a search query arrives alone, and a file's
+        # last batch is short, so waiting for a full MAX_BATCH would hang on both.
+        data, addr = self.sock.recvfrom(MAX_DATAGRAM)
+        requests = [(data, addr)]
+        self.sock.setblocking(False)
+        try:
+            while len(requests) < MAX_BATCH:
+                requests.append(self.sock.recvfrom(MAX_DATAGRAM))
+        except BlockingIOError:
+            pass  # Queue is empty -- embed what we have
+        finally:
+            self.sock.setblocking(True)
+        return requests
 
-    def embed_text(self, text):
-        # normalize_embeddings=True scales the vector to unit length, which is what makes a
-        # plain dot product on the C++ side equal cosine similarity. Without it the clamp in
-        # VectorMath::dot_product would be silently clipping real values.
-        embedding = model.encode(text, normalize_embeddings=True) # Generate the embedding
-        return embedding.astype('float32').tobytes() # Convert to raw float32 bytes for sending
+    def embed_texts(self, texts):
+        # One encode call for the whole batch. The per-call overhead (Python, tokenizer,
+        # tensor setup) is paid once instead of once per line, which is where the speedup is.
+        # normalize_embeddings=True scales each vector to unit length, which is what makes a
+        # plain dot product on the C++ side equal cosine similarity.
+        embeddings = model.encode(texts, normalize_embeddings=True, batch_size=MAX_BATCH)
+        return [embedding.astype('float32').tobytes() for embedding in embeddings]
 
-    def send_data(self):
-        text, addr = self.receive_data()
-        self.sock.sendto(self.embed_text(text), addr) # Reply to whoever asked
-        return text, addr
+    def serve_batch(self):
+        requests = self.receive_batch()
+        texts = [data.decode('utf-8', errors='replace') for data, _ in requests]
+        # Replies go out in arrival order, one per request. The client matches replies to
+        # chunks by order, so this must not be reordered.
+        for embedding, (_, addr) in zip(self.embed_texts(texts), requests):
+            self.sock.sendto(embedding, addr)
+        return texts
 
     def serve_forever(self):
         print(f"listening on {SERVER_IP}:{SERVER_PORT}", flush=True)
         while True:
             try:
-                text, addr = self.send_data()
-                preview = text[:60].replace("\n", " ")
-                print(f"  {addr} -> embedded {len(text)} chars: {preview!r}", flush=True)
+                texts = self.serve_batch()
+                preview = texts[0][:60].replace("\n", " ")
+                print(f"  embedded batch of {len(texts)}: {preview!r}", flush=True)
             except (UnicodeDecodeError, OSError) as e:
                 # One malformed request should not take the server down mid-index.
                 print(f"  request failed: {e}", flush=True)

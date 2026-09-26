@@ -33,20 +33,16 @@ std::vector<VectorSearch::SearchResult> VectorSearch::search(Socket& socket,cons
     socket.send(query);
     socket.receive(query_embedding.data(), query_embedding.size());
 
-    // Split the timing here: everything before this point is one network round trip
-    // plus a model forward pass, everything after is pure local compute.
+
     const auto t_embedded = std::chrono::steady_clock::now();
 
-    // Count the chunks up front so results allocates exactly once. Without this the
-    // vector doubles its way to the final size, copying everything it already holds
-    // on each reallocation.
     std::size_t total_chunks = 0;
     for (const auto& file : Files) {
         total_chunks += file.getChunks().size();
     }
 
     std::vector<SearchResult> results;
-    results.reserve(total_chunks);
+    results.reserve(total_chunks); // We dont want to continuously reallocate and move SearchResults
     for (const auto& file : Files) {
         for (const auto& chunk : file.getChunks()) {
             results.push_back({ &chunk, VectorMath::dot_product(query_embedding, chunk.embedding) });

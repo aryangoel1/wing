@@ -28,8 +28,9 @@ public:
 
     // We now need a function that receives the embedding from the server and then stores it in the
     // chunk. float* embedding is where the data will be stored
-    // size 
-    void receive(float* embedding, std::size_t size); 
+    // size
+    void receive(float* embedding, std::size_t size);
+    int get_fd() const { return m_fd; }
 };
 
 #endif /* CDB476FF_8020_462E_815F_B6DEB12AFEE5 */

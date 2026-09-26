@@ -3,9 +3,12 @@
 #include <cstdint>
 #include <fstream>
 #include <iterator>
+#include <cstddef>
+#include <sys/socket.h>
 #include <utility> // std::move inside the utility header will cast the specific object to an rvalue reference
 #include <print>
-
+#include <numeric>
+#include <vector>
 
 File::File(const std::filesystem::path& path) {
     // If this variable was outside the body of the constructor, then it would be shared across all
@@ -78,9 +81,30 @@ void File::displayFormattedContents() const {
 }
 
 void File::embed(Socket& socket) {
-    for (auto& chunk : chunks) {
-        socket.send(chunk.text); // Send the chunk's text to the embedding server
-        socket.receive(chunk.embedding.data(),
-                       chunk.embedding.size()); // Receive the embedding and store it in the chunk
+    // This function will send a batch size of 42 - 42 lines total
+    // However, to reduce padding within all-minilm, we need to send the data with padding minimized
+    // This means, we sort the file by whichever line is longest in length
+    // First, we sort the file by which chunks have the biggest length
+    // Swapping an array would mean copying O(n) operation 
+
+    // Use the index to access the chunk directly from there rather than rearranging the chunks
+    // Rearranging the Chunks can cause 1536 bytes to get copied per swap versus rearranging the
+    // indices. std::sort expects the same type as the template instantiation in the parameter list
+    // [&] allows the lambda to recieve access to local variables by reference
+    std::vector<std::size_t> order(chunks.size()); // auto-initializes all elements to 0 
+    std::iota(order.begin(), order.end(), 0);  // Fills a range with sequentially incrementing values
+    std::sort(order.begin(), order.end(),
+              [&](std::size_t a, std::size_t b) { return chunks[a].text.length() > chunks[b].text.length(); });
+
+    constexpr std::size_t batch_size = 42; // Directly baked into the binary - treated as a raw number
+ 
+    for (std::size_t start = 0; start < chunks.size(); start += batch_size) {
+        const std::size_t end = std::min(start + batch_size, chunks.size());
+        for (std::size_t i = start; i < end; ++i) {
+            socket.send(chunks[order[i]].text); // Send by order index
+        }
+        for (std::size_t i = start; i < end; ++i) {
+            socket.receive(chunks[order[i]].embedding.data(), chunks[order[i]].embedding.size()); 
+        }
     }
-}
+}    

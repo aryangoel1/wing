@@ -3,6 +3,8 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <sys/socket.h>
+#include <sys/types.h>
 
 // Socket calls report failure by returning -1 and setting errno. This turns errno into
 // readable text so an exception says what went wrong, not just where.
@@ -56,7 +58,7 @@ void Socket::send(const std::string& message) {
 
 void Socket::receive(float* embedding, std::size_t size) {
     const std::size_t expected = size * sizeof(float);
-    // Signed size_t
+    // Signed size_t - used to represent a total count of bytes or an error code (-1)
     ssize_t bytes_received = ::recv(m_fd, embedding, expected, 0);
     if (bytes_received < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) { // SO_RCVTIMEO expired
@@ -67,5 +69,5 @@ void Socket::receive(float* embedding, std::size_t size) {
     if (static_cast<std::size_t>(bytes_received) != expected) {
         throw std::runtime_error("Received " + std::to_string(bytes_received) +
                                  " bytes, expected " + std::to_string(expected));
-    }
+    } 
 }

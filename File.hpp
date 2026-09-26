@@ -18,7 +18,7 @@ public:
 
     // No copy constructor since copying chunks can linearly scale with the size of the file
     // as that would mean allocating a new std::vector and then explicitly copying each chunk into it
-    File(const File&) = delete;
+    File(const File&) = delete; 
     File& operator=(const File&) = delete;
     File(File&&) noexcept = default;
 
@@ -34,6 +34,6 @@ public:
     // Return a span of chunks belonging to the file, however one cannot modify the chunks
     // pointer + length where length is the number of elements (not number of bytes)
     std::span<const Chunk> getChunks() const noexcept { return chunks; } 
-};
+}; 
 
 #endif /* EEB45E86_ABC9_4246_9506_71F1A4BA48D8 */
