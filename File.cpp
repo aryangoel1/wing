@@ -3,108 +3,106 @@
 #include <cstdint>
 #include <fstream>
 #include <iterator>
-#include <cstddef>
-#include <sys/socket.h>
-#include <utility> // std::move inside the utility header will cast the specific object to an rvalue reference
-#include <print>
 #include <numeric>
+#include <print>
+#include <stdexcept>
+#include <utility>
 #include <vector>
 
-File::File(const std::filesystem::path& path) {
-    // If this variable was outside the body of the constructor, then it would be shared across all
-    // File objects, essentially making it static
-    std::uint64_t line_number = 1; // This makes it so that it is not shared across every File object
+File::File(const std::filesystem::path& path) : file_path_(path) {
+    std::uint64_t line_number = 1;
     std::ifstream input(path);
     if (!input.is_open()) {
         throw std::runtime_error("Could not open file: " + path.string());
     }
 
-    // Count the lines up front so that chunks allocates exactly once.
-    // Without this, std::vector grows by doubling, and every reallocation has to relocate
-    // every Chunk built so far. Now that Chunk holds its embedding inline it is ~1.6 KB,
-    // so that relocation moves real bytes rather than a handful of pointers.
-    // istreambuf_iterator reads raw characters straight from the stream buffer,
-    // skipping the formatting layer that operator>> would go through.
     const auto newline_count = std::count(
         std::istreambuf_iterator<char>(input),
         std::istreambuf_iterator<char>(),
         '\n'
     );
 
-    // The counting pass consumed the stream and set the EOF flag, so clear the flag
-    // and seek back to byte 0 before the real pass. clear() must come first:
-    // seekg() on a stream in a failed state is a no-op.
     input.clear();
     input.seekg(0);
 
-    // An upper bound: this counts blank lines too, and those get skipped below.
-    // Reserving slightly over is free, whereas reserving under costs a reallocation.
-    // The +1 covers a final line with no trailing newline.
-    chunks.reserve(static_cast<std::size_t>(newline_count) + 1);
+    const auto upper_bound = static_cast<std::size_t>(newline_count) + 1;
+    embeddings_.reserve(upper_bound);
+    chunk_ids_.reserve(upper_bound);
+    text_offsets_.reserve(upper_bound + 1);
+
+    std::error_code ec;
+    const auto bytes = std::filesystem::file_size(path, ec);
+    if (!ec) {
+        text_buffer_.reserve(static_cast<std::size_t>(bytes));
+    }
+
+    text_offsets_.push_back(0);
 
     std::string line;
     while (std::getline(input, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
         if (line.empty()) {
             ++line_number;
-            continue; 
+            continue;
         }
-        Chunk chunk{};
-        chunk.text = line;
-        chunk.id = line_number++;
-        chunk.file_path = path;
 
-        // std::move casts chunk to an rvalue reference so push_back moves instead of copies.
-        // Note this is now weaker than it used to be: moving a Chunk still steals the two
-        // strings' buffers, but the std::array embedding has no pointer to steal, so its
-        // 1536 bytes get copied either way. Constructing in place with emplace_back would
-        // avoid that copy entirely.
-        chunks.push_back(std::move(chunk)); // std::move to not make a copy
+        text_buffer_.append(line);
+        text_offsets_.push_back(static_cast<std::uint64_t>(text_buffer_.size()));
+        chunk_ids_.push_back(line_number++);
+        embeddings_.emplace_back();
     }
 }
 
+std::string_view File::get_text(std::size_t index) const {
+    const auto start = text_offsets_[index];
+    const auto end = text_offsets_[index + 1];
+    if (end == start) {
+        return {};
+    }
+    return std::string_view(
+        text_buffer_.data() + start,
+        static_cast<std::size_t>(end - start)
+    );
+}
+
 void File::displayFileContents() const {
-    for (const auto& line : chunks) {
-        std::print("{}", line.text);
+    for (std::size_t i = 0; i < chunk_count(); ++i) {
+        std::print("{}", get_text(i));
     }
     std::println();
 }
 
 void File::displayFormattedContents() const {
-    for (const auto& chunk : chunks) {
+    for (std::size_t i = 0; i < chunk_count(); ++i) {
         std::println(
             "ID: {} | Chunk: {} | File: {}",
-            chunk.id,
-            chunk.text,
-            chunk.file_path
+            chunk_ids_[i],
+            get_text(i),
+            file_path_.string()
         );
     }
 }
 
 void File::embed(Socket& socket) {
-    // This function will send a batch size of 42 - 42 lines total
-    // However, to reduce padding within all-minilm, we need to send the data with padding minimized
-    // This means, we sort the file by whichever line is longest in length
-    // First, we sort the file by which chunks have the biggest length
-    // Swapping an array would mean copying O(n) operation 
-
-    // Use the index to access the chunk directly from there rather than rearranging the chunks
-    // Rearranging the Chunks can cause 1536 bytes to get copied per swap versus rearranging the
-    // indices. std::sort expects the same type as the template instantiation in the parameter list
-    // [&] allows the lambda to recieve access to local variables by reference
-    std::vector<std::size_t> order(chunks.size()); // auto-initializes all elements to 0 
-    std::iota(order.begin(), order.end(), 0);  // Fills a range with sequentially incrementing values
+    std::vector<std::size_t> order(chunk_count());
+    std::iota(order.begin(), order.end(), 0);
     std::sort(order.begin(), order.end(),
-              [&](std::size_t a, std::size_t b) { return chunks[a].text.length() > chunks[b].text.length(); });
+              [&](std::size_t a, std::size_t b) {
+                  return get_text(a).size() > get_text(b).size();
+              });
 
-    constexpr std::size_t batch_size = 42; // Directly baked into the binary - treated as a raw number
- 
-    for (std::size_t start = 0; start < chunks.size(); start += batch_size) {
-        const std::size_t end = std::min(start + batch_size, chunks.size());
+    constexpr std::size_t batch_size = 42;
+
+    for (std::size_t start = 0; start < order.size(); start += batch_size) {
+        const std::size_t end = std::min(start + batch_size, order.size());
         for (std::size_t i = start; i < end; ++i) {
-            socket.send(chunks[order[i]].text); // Send by order index
+            socket.send(get_text(order[i]));
         }
         for (std::size_t i = start; i < end; ++i) {
-            socket.receive(chunks[order[i]].embedding.data(), chunks[order[i]].embedding.size()); 
+            auto& embedding = embeddings_[order[i]];
+            socket.receive(embedding.data(), embedding.size());
         }
     }
-}    
+}

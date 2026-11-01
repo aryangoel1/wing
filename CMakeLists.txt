@@ -21,13 +21,32 @@ add_executable(wing
     VectorSearch.cpp
 )
 
+add_executable(wing_bench
+    bench/wing_bench.cpp
+    Socket.cpp
+    File.cpp
+)
+
+add_executable(wing_tests
+    tests/file_storage_test.cpp
+    Socket.cpp
+    File.cpp
+    VectorSearch.cpp
+)
+
 target_compile_options(wing PRIVATE -Wall -Wextra)
+target_compile_options(wing_bench PRIVATE -Wall -Wextra)
+target_compile_options(wing_tests PRIVATE -Wall -Wextra)
 
 # Debug builds turn on the sanitizers that caught the heap-use-after-free in
 # SearchResult. They have to reach the linker as well as the compiler, or the
 # runtime library never gets linked in.
 target_compile_options(wing PRIVATE $<$<CONFIG:Debug>:-fsanitize=address,undefined -fno-omit-frame-pointer>)
 target_link_options(wing    PRIVATE $<$<CONFIG:Debug>:-fsanitize=address,undefined>)
+target_compile_options(wing_bench PRIVATE $<$<CONFIG:Debug>:-fsanitize=address,undefined -fno-omit-frame-pointer>)
+target_link_options(wing_bench    PRIVATE $<$<CONFIG:Debug>:-fsanitize=address,undefined>)
+target_compile_options(wing_tests PRIVATE $<$<CONFIG:Debug>:-fsanitize=address,undefined -fno-omit-frame-pointer>)
+target_link_options(wing_tests    PRIVATE $<$<CONFIG:Debug>:-fsanitize=address,undefined>)
 
 # `cmake --install build --prefix ~/.local` copies the binary to <prefix>/bin.
 # A symlink into ~/.local/bin is better while developing though, since it always

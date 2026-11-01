@@ -6,7 +6,9 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <cstddef>
 #include <string>
+#include <string_view>
 
 // A Network socket is an endpoint for sending or receiving data across a computer network
 // A File Descriptor is a unique identifier for a file or socket in Unix-like operating systems
@@ -24,7 +26,7 @@ public:
     Socket& operator=(const Socket&) = delete; // Disable copy assignment - we dont two sockets - singleton
 
     // The send function here will actually send the text belonging to a chunk to the server
-    void send(const std::string& message);
+    void send(std::string_view message);
 
     // We now need a function that receives the embedding from the server and then stores it in the
     // chunk. float* embedding is where the data will be stored

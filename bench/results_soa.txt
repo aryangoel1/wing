@@ -1,0 +1,30 @@
+layout=SoA
+corpus_chunks=100000
+embedding_bytes=1536
+
+== ingestion (File constructor, no embed) ==
+chunks=100000
+seconds=0.0361948
+chunks_per_second=2.76283e+06
+alloc_calls=7
+alloc_bytes_requested=160784368
+zone_blocks_delta=5
+zone_size_in_use_delta=160809040
+
+== similarity search (scan + top-k, in-process embeddings) ==
+queries=80
+k=5
+queries_per_second=267.566
+latency_mean_ms=3.73737
+latency_p50_ms=3.49829
+latency_p99_ms=9.32771
+
+== memory (after ingest + filled embeddings) ==
+chunks=100000
+rss_bytes=164331520
+phys_footprint_bytes=163742200
+zone_size_in_use=160831424
+zone_blocks_in_use=55
+rss_bytes_per_chunk=1643.32
+zone_bytes_per_chunk=1608.31
+phys_footprint_bytes_per_chunk=1637.42

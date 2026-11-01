@@ -140,8 +140,8 @@ int main(int argc, char* argv[]) {
             for (const auto& hit : hits) {
                 std::println("  {}{:+.4f}{}  {}{}:{}{}  {}",
                              CYAN, hit.score, RESET,
-                             DIM, hit.chunk->file_path, hit.chunk->id, RESET,
-                             hit.chunk->text);
+                             DIM, hit.file_path->string(), hit.id, RESET,
+                             hit.text);
             }
             std::println();
         } else {

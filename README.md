@@ -38,23 +38,25 @@ omissions, explained under [Design notes](#design-notes).
 ```
   ┌─────────────────────────── C++23 ────────────────────────────┐
   │                                                              │
-  │   File ──▶ Chunk[]  ────────▶  Socket  ────────▶             │   UDP     ┌── Python ──┐
-  │   one chunk per line          RAII fd owner,   ──────────────┼──────────▶│ all-MiniLM │
-  │                               connect()ed UDP                │  text     │   -L6-v2   │
+  │   File (SoA) ── embeddings[] ──▶ Socket  ──────▶             │   UDP     ┌── Python ──┐
+  │   one line per chunk              RAII fd owner,─────────────┼──────────▶│ all-MiniLM │
+  │   flat text_buffer + offsets      connect()ed UDP            │  text     │   -L6-v2   │
   │                                                              │◀──────────│            │
-  │   VectorSearch ◀── 384 floats stored inline in each Chunk    │ 1536 B    └────────────┘
+  │   VectorSearch ◀── contiguous 384-float embeddings           │ 1536 B    └────────────┘
   │        │                                                     │
   │        └──▶ VectorMath::dot_product  ──▶  top-k              │
   │             hand-written ARM NEON                            │
   └──────────────────────────────────────────────────────────────┘
 ```
 
-1. `File` splits a text file into one `Chunk` per non-blank line.
+1. `File` splits a text file into one chunk per non-blank line, concatenating text
+   into a single buffer and storing embeddings, ids, and offsets as parallel arrays.
 2. `Socket` ships each line to a Python sidecar over a connected UDP socket.
 3. The sidecar runs `all-MiniLM-L6-v2` and returns 384 normalised `float32`s.
-4. `VectorMath::dot_product` scores the query against every chunk using ARM NEON
+4. `VectorMath::dot_product` scores the query against every embedding using ARM NEON
    intrinsics. Because the vectors are unit-length, the dot product *is* cosine similarity.
-5. `VectorSearch` ranks with `std::partial_sort` and returns the top *k*.
+5. `VectorSearch` ranks with `std::partial_sort` and only then reads text and paths
+   for the top *k*.
 
 ## Build
 
@@ -115,18 +117,10 @@ Four independent accumulators break the dependency chain between fused multiply-
 the CPU can keep several in flight. clang does not autovectorise the scalar version to
 equivalent quality.
 
-**Memory layout** — storing embeddings as `std::array<float, 384>` *inside* `Chunk`
-rather than `std::vector<float>`, measured over 50,000 chunks:
-
-| layout | `sizeof(Chunk)` | scan |
-|---|---|---|
-| `std::vector<float>` member | 80 B | 1.77 ms |
-| `std::array<float, 384>` member | 1592 B | **1.19 ms** |
-
-A `std::vector` member stores a *pointer*; the floats live in a separate heap allocation,
-so a scan chases one pointer per chunk and the prefetcher can't predict the pattern.
-Inline storage turns the scan into a fixed-stride walk. Counting lines up front and
-calling `reserve()` made ingestion a further **4.2×** faster.
+**Memory layout** — embeddings live in a dedicated contiguous vector (Structure of Arrays),
+not interleaved with text and paths inside a `Chunk` object. Similarity search walks
+1536-byte embedding records; text is retrieved only for the top hits. File paths are
+stored once per file. Chunk text is concatenated into one buffer with 64-bit offsets.
 
 **Scan time vs. corpus size:**
 
@@ -166,17 +160,17 @@ Batching properly would require TCP.
   large file is slow and a single dropped datagram aborts the run.
 - **Apple Silicon and macOS only.** The kernel uses ARM NEON intrinsics, and path
   resolution uses `_NSGetExecutablePath`.
-- **CRLF files** are mishandled: `std::getline` leaves the `\r`, so blank lines become
-  chunks and every line carries a trailing carriage return.
+- **CRLF files** are normalised: a trailing `\r` is stripped after `std::getline`, so
+  Windows line endings match LF.
 
 ## Layout
 
 | file | |
 |---|---|
-| `Chunk.hpp` | one line of text plus its 384-float embedding, stored inline |
+| `Chunk.hpp` | `EMBEDDING_DIM` (384) |
 | `VectorMath.hpp` | NEON dot product |
 | `Socket.hpp/.cpp` | RAII file-descriptor owner, connected UDP, timeouts |
-| `File.hpp/.cpp` | reads a file into chunks, embeds them |
+| `File.hpp/.cpp` | SoA storage: embeddings, flat text buffer, offsets, ids |
 | `VectorSearch.hpp/.cpp` | holds the files, scores and ranks a query |
 | `main.cpp` | CLI |
 | `embedding_server.py` | the sidecar |

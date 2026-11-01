@@ -48,10 +48,10 @@ Socket::~Socket() {
     close(m_fd); // Close the socket when the object is destroyed - prevent resource leaks
 }
 
-void Socket::send(const std::string& message) {
+void Socket::send(std::string_view message) {
     // ::send, not sendto, because connect() already told the kernel where to aim.
     // The leading :: reaches the global C function past this class's own send().
-    if (::send(m_fd, message.c_str(), message.size(), 0) < 0) {
+    if (::send(m_fd, message.data(), message.size(), 0) < 0) {
         throw os_error("Failed to send message");
     }
 }

@@ -1,13 +1,11 @@
 #include "VectorSearch.hpp"
-#include "Chunk.hpp"
-#include "Socket.hpp"
 #include "VectorMath.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <print>
 #include <utility>
-#include <cstddef>  
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -18,48 +16,82 @@ void VectorSearch::addFile(const std::filesystem::path& path) {
 
 void VectorSearch::embedAll(Socket& socket) {
     for (auto& file : Files) {
-        file.embed(socket); 
+        file.embed(socket);
     }
 }
 
-std::vector<VectorSearch::SearchResult> VectorSearch::search(Socket& socket,const std::string& query, std::size_t k) const {
+std::vector<VectorSearch::SearchResult> VectorSearch::rank(std::span<const float> query,
+                                                           std::size_t k) const {
     if (k == 0) {
         return {};
     }
+
+    struct Candidate {
+        std::size_t file_index;
+        std::size_t chunk_index;
+        float score;
+    };
+
+    std::size_t total_chunks = 0;
+    for (const auto& file : Files) {
+        total_chunks += file.chunk_count();
+    }
+
+    std::vector<Candidate> candidates;
+    candidates.reserve(total_chunks);
+    for (std::size_t f = 0; f < Files.size(); ++f) {
+        const auto embs = Files[f].embeddings();
+        for (std::size_t i = 0; i < embs.size(); ++i) {
+            candidates.push_back(
+                {f, i, VectorMath::dot_product(query, embs[i])});
+        }
+    }
+
+    auto by_score = [](const Candidate& left, const Candidate& right) {
+        return left.score > right.score;
+    };
+
+    if (candidates.size() > k) {
+        std::partial_sort(candidates.begin(),
+                          candidates.begin() + static_cast<std::ptrdiff_t>(k),
+                          candidates.end(), by_score);
+        candidates.resize(k);
+    } else {
+        std::sort(candidates.begin(), candidates.end(), by_score);
+    }
+
+    std::vector<SearchResult> results;
+    results.reserve(candidates.size());
+    for (const auto& c : candidates) {
+        const auto& file = Files[c.file_index];
+        results.push_back({
+            file.chunk_id(c.chunk_index),
+            c.score,
+            file.get_text(c.chunk_index),
+            &file.path(),
+        });
+    }
+    return results;
+}
+
+std::vector<VectorSearch::SearchResult> VectorSearch::search(Socket& socket,
+                                                             const std::string& query,
+                                                             std::size_t k) const {
     const auto t_start = std::chrono::steady_clock::now();
 
-    // Embed the query using the socket
     std::array<float, EMBEDDING_DIM> query_embedding{};
     socket.send(query);
     socket.receive(query_embedding.data(), query_embedding.size());
 
-
     const auto t_embedded = std::chrono::steady_clock::now();
+
+    auto results = rank(query_embedding, k);
 
     std::size_t total_chunks = 0;
     for (const auto& file : Files) {
-        total_chunks += file.getChunks().size();
+        total_chunks += file.chunk_count();
     }
 
-    std::vector<SearchResult> results;
-    results.reserve(total_chunks); // We dont want to continuously reallocate and move SearchResults
-    for (const auto& file : Files) {
-        for (const auto& chunk : file.getChunks()) {
-            results.push_back({ &chunk, VectorMath::dot_product(query_embedding, chunk.embedding) });
-        }
-    }
-    auto by_score = [](const SearchResult& left, const SearchResult& right) {
-        return left.score > right.score;
-    };
-
-    if (results.size() > k) {
-        // Sort the first k results of the results vector using the specified lambda function
-        // ptrdiff_t stores the result of subtracting 2 pointers
-        std::partial_sort(results.begin(), results.begin() + static_cast<std::ptrdiff_t>(k), results.end(), by_score);
-        results.resize(k);
-    } else {
-        std::sort(results.begin(), results.end(), by_score);
-    }
     const auto t_done = std::chrono::steady_clock::now();
     const auto ms = [](auto from, auto to) {
         return std::chrono::duration<double, std::milli>(to - from).count();

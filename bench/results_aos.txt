@@ -1,0 +1,30 @@
+layout=AoS
+corpus_chunks=100000
+sizeof_Chunk=1592
+
+== ingestion (File constructor, no embed) ==
+chunks=100000
+seconds=0.0463145
+chunks_per_second=2.15915e+06
+alloc_calls=200003
+alloc_bytes_requested=172005744
+zone_blocks_delta=200001
+zone_size_in_use_delta=173603328
+
+== similarity search (scan + top-k, in-process embeddings) ==
+queries=80
+k=5
+queries_per_second=251.786
+latency_mean_ms=3.97159
+latency_p50_ms=3.96877
+latency_p99_ms=4.59061
+
+== memory (after ingest + filled embeddings) ==
+chunks=100000
+rss_bytes=177340416
+phys_footprint_bytes=176734712
+zone_size_in_use=173625712
+zone_blocks_in_use=200051
+rss_bytes_per_chunk=1773.4
+zone_bytes_per_chunk=1736.26
+phys_footprint_bytes_per_chunk=1767.35
