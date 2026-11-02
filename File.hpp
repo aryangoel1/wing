@@ -11,6 +11,10 @@
 #include <string_view>
 #include <vector>
 
+// How File reads its source text. Both run the exact same line parser; only the
+// path from the page cache into the process differs.
+enum class LoadMethod { Stream, Mmap };
+
 class File {
 private:
     std::vector<std::array<float, EMBEDDING_DIM>> embeddings_;
@@ -18,9 +22,15 @@ private:
     std::vector<std::uint64_t> text_offsets_;
     std::vector<std::uint64_t> chunk_ids_;
     std::filesystem::path file_path_;
+    double load_seconds_ = 0.0;
+
+    void reserve_for(std::size_t newline_count, std::uintmax_t bytes);
+    void append_line(std::string_view line, std::uint64_t& line_number);
+    void load_stream(const std::filesystem::path& path);
+    void load_mmap(const std::filesystem::path& path);
 
 public:
-    explicit File(const std::filesystem::path& path);
+    explicit File(const std::filesystem::path& path, LoadMethod method = LoadMethod::Mmap);
 
     File(const File&) = delete;
     File& operator=(const File&) = delete;
@@ -36,6 +46,7 @@ public:
     std::uint64_t chunk_id(std::size_t index) const { return chunk_ids_[index]; }
     const std::filesystem::path& path() const noexcept { return file_path_; }
     std::size_t text_offset_count() const noexcept { return text_offsets_.size(); }
+    double load_seconds() const noexcept { return load_seconds_; }
 
     std::span<const std::array<float, EMBEDDING_DIM>> embeddings() const noexcept {
         return embeddings_;

@@ -130,6 +130,34 @@ stored once per file. Chunk text is concatenated into one buffer with 64-bit off
 | 100,000 | 147 MB | 2.9 ms |
 | 1,000,000 | 1.5 GB | 22 ms |
 
+**File loading: `mmap` vs. `std::ifstream`.** `File`'s constructor can read a file two
+ways (`LoadMethod::Mmap`, the default, or `LoadMethod::Stream`). Both feed the same line
+parser and produce identical chunks, ids and text, checked before every timing run. The
+time is measured with `std::chrono::steady_clock` inside the constructor and exposed as
+`File::load_seconds()`. Corpus: `samples/big.txt` repeated to the line count. 50
+interleaved iterations per method after 5 warm-ups, warm page cache, `-O3`. Embedding
+is excluded. This is read + parse only.
+
+| lines | file size | ifstream median | mmap median | ifstream p95 | mmap p95 | speedup |
+|---|---|---|---|---|---|---|
+| 10,000 | 1.05 MB | 2.670 ms | 0.415 ms | 2.818 ms | 0.490 ms | **6.43×** |
+| 100,000 | 10.7 MB | 25.971 ms | 3.880 ms | 26.620 ms | 3.984 ms | **6.69×** |
+| 1,000,000 | 107 MB | 266.024 ms | 39.226 ms | 290.268 ms | 45.558 ms | **6.78×** |
+
+A second full run landed within a few percent (6.55×, 6.70×, 6.71×).
+
+Where the time goes (100,000 lines, median of 30, each phase timed alone):
+
+| phase | ifstream | mmap |
+|---|---|---|
+| count newlines (for `reserve`) | 20.975 ms (`istreambuf_iterator`) | 1.673 ms (`std::count` on `char*`) |
+| split + copy into `text_buffer_` | 4.687 ms (`getline` + `append`) | 1.196 ms (`memchr` + `append`) |
+
+Most of the gap is not the kernel → user copy. It is the byte-at-a-time
+`istreambuf_iterator` pass that counts lines, which a raw mapped buffer avoids. Removing
+the per-line `std::string` from `getline` accounts for most of the rest. Cold-cache
+(first read from disk) behaviour was not measured.
+
 ## Design notes
 
 **Why no ANN index.** Brute-force search over 100,000 chunks takes 2.9 ms, while indexing
@@ -160,7 +188,7 @@ Batching properly would require TCP.
   large file is slow and a single dropped datagram aborts the run.
 - **Apple Silicon and macOS only.** The kernel uses ARM NEON intrinsics, and path
   resolution uses `_NSGetExecutablePath`.
-- **CRLF files** are normalised: a trailing `\r` is stripped after `std::getline`, so
+- **CRLF files** are normalised: a trailing `\r` is stripped from each line, so
   Windows line endings match LF.
 
 ## Layout
