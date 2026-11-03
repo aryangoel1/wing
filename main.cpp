@@ -53,12 +53,15 @@ void printUsage(const char* program) {
 // the real build/wing, which is what lets a bare filename resolve no matter which
 // directory the user ran from.
 std::filesystem::path executableDir() {
-    std::uint32_t size = 0;
+  std::uint32_t size = 0;
+  // _NSGetExecutablePath is a macOS function that
+  // tells us how much space we need to allocate for the path
     _NSGetExecutablePath(nullptr, &size);      // first call just asks for the length
     std::string buffer(size, '\0');
     if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
         return std::filesystem::current_path();
     }
+
     return std::filesystem::canonical(buffer.c_str()).parent_path();
 }
 
