@@ -11,10 +11,6 @@
 #include <string_view>
 #include <vector>
 
-// How File reads its source text. Both run the exact same line parser; only the
-// path from the page cache into the process differs.
-enum class LoadMethod { Stream, Mmap };
-
 class File {
 private:
     std::vector<std::array<float, EMBEDDING_DIM>> embeddings_;
@@ -26,11 +22,10 @@ private:
 
     void reserve_for(std::size_t newline_count, std::uintmax_t bytes);
     void append_line(std::string_view line, std::uint64_t& line_number);
-    void load_stream(const std::filesystem::path& path);
     void load_mmap(const std::filesystem::path& path);
 
 public:
-    explicit File(const std::filesystem::path& path, LoadMethod method = LoadMethod::Mmap);
+    explicit File(const std::filesystem::path& path);
 
     File(const File&) = delete;
     File& operator=(const File&) = delete;

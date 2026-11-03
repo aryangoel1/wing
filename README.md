@@ -130,11 +130,12 @@ stored once per file. Chunk text is concatenated into one buffer with 64-bit off
 | 100,000 | 147 MB | 2.9 ms |
 | 1,000,000 | 1.5 GB | 22 ms |
 
-**File loading: `mmap` vs. `std::ifstream`.** `File`'s constructor can read a file two
-ways (`LoadMethod::Mmap`, the default, or `LoadMethod::Stream`). Both feed the same line
-parser and produce identical chunks, ids and text, checked before every timing run. The
-time is measured with `std::chrono::steady_clock` inside the constructor and exposed as
-`File::load_seconds()`. Corpus: `samples/big.txt` repeated to the line count. 50
+**File loading: `mmap` vs. `std::ifstream`.** `File`'s constructor maps the file with
+`mmap` and scans it as a raw buffer. It used to read it with `std::ifstream` and
+`std::getline`. The two were benchmarked side by side before the switch, running the same
+line parser, and they produced identical chunks, ids and text, checked before every timing
+run. The time is measured with `std::chrono::steady_clock` inside the constructor and
+exposed as `File::load_seconds()`. Corpus: `samples/big.txt` repeated to the line count. 50
 interleaved iterations per method after 5 warm-ups, warm page cache, `-O3`. Embedding
 is excluded. This is read + parse only.
 

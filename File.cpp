@@ -5,24 +5,18 @@
 #include <cstdint>
 #include <cstring>
 #include <fcntl.h>
-#include <fstream>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <iterator>
 #include <numeric>
 #include <print>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
-File::File(const std::filesystem::path& path, LoadMethod method) : file_path_(path) {
+File::File(const std::filesystem::path& path) : file_path_(path) {
     const auto start = std::chrono::steady_clock::now();
-    if (method == LoadMethod::Mmap) {
-        load_mmap(path);
-    } else {
-        load_stream(path);
-    }
+    load_mmap(path);
     load_seconds_ = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 }
 
@@ -35,7 +29,6 @@ void File::reserve_for(std::size_t newline_count, std::uintmax_t bytes) {
     text_offsets_.push_back(0);
 }
 
-// One line parser for both backends, so any timing difference is purely I/O.
 void File::append_line(std::string_view line, std::uint64_t& line_number) {
     if (!line.empty() && line.back() == '\r') {
         line.remove_suffix(1);
@@ -48,34 +41,6 @@ void File::append_line(std::string_view line, std::uint64_t& line_number) {
     text_offsets_.push_back(static_cast<std::uint64_t>(text_buffer_.size()));
     chunk_ids_.push_back(line_number++);
     embeddings_.emplace_back();
-}
-
-// read() copies page cache -> filebuf's buffer, getline copies that into `line`,
-// then append copies it into text_buffer_. The file is also read twice (count + parse).
-void File::load_stream(const std::filesystem::path& path) {
-    std::ifstream input(path);
-    if (!input.is_open()) {
-        throw std::runtime_error("Could not open file: " + path.string());
-    }
-
-    const auto newline_count = std::count(
-        std::istreambuf_iterator<char>(input),
-        std::istreambuf_iterator<char>(),
-        '\n'
-    );
-
-    input.clear();
-    input.seekg(0);
-
-    std::error_code ec; // error code is a struct that contains the error code and the message
-    const auto bytes = std::filesystem::file_size(path, ec);
-    reserve_for(static_cast<std::size_t>(newline_count), ec ? 0 : bytes);
-
-    std::uint64_t line_number = 1;
-    std::string line;
-    while (std::getline(input, line)) {
-        append_line(line, line_number);
-    }
 }
 
 // mmap maps the page cache straight into our address space: no read() copy and no
